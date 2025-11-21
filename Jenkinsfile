@@ -13,7 +13,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'develop',
-                url: 'https://github.com/your-username/your-vue-repo.git',
+                url: 'https://github.com/sarmexin/project_name.git',
                 credentialsId: 'your-github-credentials'
             }
         }
