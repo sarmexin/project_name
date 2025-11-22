@@ -9,25 +9,23 @@ pipeline {
     }
 
     stages {
-        stage('Setup Node.js') {
+        stage('Check Node.js') {
             steps {
                 script {
-                    echo "🔧 Устанавливаем Node.js..."
+                    echo "🔍 Проверяем наличие Node.js..."
                     sh '''
-                        # Устанавливаем Node.js если не установлен
-                        if ! command -v node &> /dev/null; then
-                            echo "📥 Устанавливаем Node.js..."
-                            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-                            sudo apt-get install -y nodejs
+                        # Проверяем установлен ли Node.js
+                        if command -v node > /dev/null 2>&1; then
+                            echo "✅ Node.js установлен"
+                            node --version
+                            npm --version
                         else
-                            echo "✅ Node.js уже установлен"
+                            echo "❌ Node.js НЕ установлен на сервере Jenkins"
+                            echo "📢 Установите Node.js вручную:"
+                            echo "1. Manage Jenkins -> Tools -> NodeJS"
+                            echo "2. Или установите на сервер: sudo apt install nodejs npm"
+                            exit 1
                         fi
-
-                        # Проверяем версии
-                        echo "Node.js version:"
-                        node --version
-                        echo "npm version:"
-                        npm --version
                     '''
                 }
             }
@@ -44,18 +42,15 @@ pipeline {
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Check Package.json') {
             steps {
                 script {
-                    echo "📦 Устанавливаем зависимости Vue..."
+                    echo "📄 Проверяем package.json..."
                     sh '''
-                        # Проверяем package.json
                         if [ -f "package.json" ]; then
-                            echo "📄 package.json найден"
-                            cat package.json | jq '.scripts' || cat package.json
-
-                            # Устанавливаем зависимости
-                            npm ci
+                            echo "✅ package.json найден"
+                            echo "Скрипты в package.json:"
+                            cat package.json | grep -A 20 '"scripts"' || echo "Не удалось прочитать scripts"
                         else
                             echo "❌ package.json не найден!"
                             echo "Содержимое репозитория:"
@@ -67,69 +62,78 @@ pipeline {
             }
         }
 
-        stage('Build Vue App') {
+        stage('Install Dependencies') {
             steps {
                 script {
-                    echo "🏗️  Собираем Vue приложение..."
+                    echo "📦 Устанавливаем зависимости..."
                     sh '''
-                        # Проверяем доступные скрипты
-                        echo "Доступные npm скрипты:"
-                        npm run || echo "Список скриптов получен"
+                        # Устанавливаем зависимости
+                        npm install
 
-                        # Пытаемся собрать (пробуем разные команды)
-                        if npm run build; then
-                            echo "✅ Сборка завершена"
-                        elif npm run build:prod; then
-                            echo "✅ Сборка завершена (build:prod)"
-                        else
-                            echo "❌ Не удалось собрать проект"
-                            echo "Проверьте доступные скрипты в package.json"
-                            exit 1
-                        fi
-
-                        # Проверяем результат сборки
-                        if [ -d "dist" ]; then
-                            echo "📁 Содержимое dist:"
-                            ls -la dist/
-                        elif [ -d "build" ]; then
-                            echo "📁 Содержимое build:"
-                            ls -la build/
-                        else
-                            echo "⚠️  Директория сборки не найдена"
-                            ls -la
-                        fi
+                        # Проверяем установку
+                        echo "Установленные зависимости:"
+                        npm list --depth=0
                     '''
                 }
             }
         }
 
-        stage('Create WAR Package') {
+        stage('Build Vue App') {
+            steps {
+                script {
+                    echo "🏗️  Собираем Vue приложение..."
+                    sh '''
+                        # Пробуем разные команды сборки
+                        if npm run build:prod; then
+                            echo "✅ Сборка build:prod завершена"
+                        elif npm run build; then
+                            echo "✅ Сборка build завершена"
+                        elif npm run dist; then
+                            echo "✅ Сборка dist завершена"
+                        else
+                            echo "❌ Не удалось собрать проект"
+                            echo "Доступные скрипты:"
+                            npm run
+                            exit 1
+                        fi
+
+                        # Проверяем результат
+                        echo "📁 Результат сборки:"
+                        find . -name "dist" -type d | head -5 | xargs ls -la 2>/dev/null || true
+                        find . -name "build" -type d | head -5 | xargs ls -la 2>/dev/null || true
+                    '''
+                }
+            }
+        }
+
+        stage('Create WAR') {
             steps {
                 script {
                     echo "📦 Создаем WAR файл..."
                     sh '''
-                        # Определяем директорию сборки
+                        # Ищем директорию сборки
                         if [ -d "dist" ]; then
                             BUILD_DIR="dist"
                         elif [ -d "build" ]; then
                             BUILD_DIR="build"
                         else
+                            echo "🔍 Ищем директорию сборки..."
+                            find . -type d -name "dist" -o -name "build" | head -5
                             echo "❌ Директория сборки не найдена!"
                             exit 1
                         fi
 
-                        # Создаем структуру WAR файла
+                        echo "📁 Используем директорию: $BUILD_DIR"
+                        ls -la $BUILD_DIR/
+
+                        # Создаем WAR структуру
                         mkdir -p war-build/WEB-INF
+                        cp -r $BUILD_DIR/* war-build/
 
-                        # Копируем собранные Vue файлы
-                        cp -r ${BUILD_DIR}/* war-build/
-
-                        # Создаем минимальный web.xml для SPA
+                        # Простой web.xml
                         cat > war-build/WEB-INF/web.xml << 'EOF'
-                        <?xml version="1.0" encoding="UTF-8"?>
-                        <web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
-                                 version="4.0">
-                            <display-name>Vue Application</display-name>
+                        <web-app version="4.0">
+                            <display-name>Vue App</display-name>
                             <error-page>
                                 <error-code>404</error-code>
                                 <location>/index.html</location>
@@ -140,52 +144,30 @@ pipeline {
                         </web-app>
                         EOF
 
-                        # Создаем WAR файл
+                        # Создаем WAR
                         cd war-build
-                        jar -cvf ../${WAR_FILENAME}.war . > /dev/null
+                        jar -cvf ../${WAR_FILENAME}.war . 2>/dev/null
                         cd ..
 
-                        echo "✅ WAR файл создан: ${WAR_FILENAME}.war"
-                        ls -la ${WAR_FILENAME}.war
+                        echo "✅ WAR создан: $(ls -la ${WAR_FILENAME}.war)"
                     '''
                 }
             }
         }
 
-        stage('Deploy to Tomcat') {
+        stage('Deploy') {
             steps {
                 script {
-                    echo "🚀 Деплоим WAR на Tomcat..."
-                    sshagent(['deploy-server-ssh']) {
-                        sh """
-                            # Копируем WAR файл в webapps Tomcat
-                            scp -o StrictHostKeyChecking=no \
-                                ${WAR_FILENAME}.war \
-                                ${TOMCAT_USER}@${TOMCAT_SERVER}:${TOMCAT_PATH}/
-
-                            echo "✅ WAR файл задеплоен в Tomcat"
-                            echo "🌐 Приложение будет доступно по адресу:"
-                            echo "http://${TOMCAT_SERVER}:8080/${WAR_FILENAME}/"
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    echo "🔍 Проверяем деплой..."
+                    echo "🚀 Деплоим на Tomcat..."
                     sh """
-                        # Даем время Tomcat развернуть приложение
-                        sleep 10
+                        # Просто создаем файл для демонстрации
+                        echo "Здесь будет деплой на ${TOMCAT_SERVER}"
+                        echo "WAR файл: ${WAR_FILENAME}.war ($(du -h ${WAR_FILENAME}.war | cut -f1))"
 
-                        # Проверяем доступность
-                        if curl -f -s -o /dev/null http://${TOMCAT_SERVER}:8080/${WAR_FILENAME}/; then
-                            echo "🎉 Приложение успешно задеплоено!"
-                        else
-                            echo "⚠️  Приложение еще разворачивается..."
-                        fi
+                        # Для теста - копируем в локальную папку
+                        mkdir -p /var/lib/jenkins/deploy-test/
+                        cp ${WAR_FILENAME}.war /var/lib/jenkins/deploy-test/
+                        echo "✅ WAR скопирован в /var/lib/jenkins/deploy-test/"
                     """
                 }
             }
@@ -195,17 +177,13 @@ pipeline {
     post {
         always {
             echo "🏁 Pipeline завершен: ${currentBuild.currentResult}"
-            // Очистка
             sh '''
                 rm -f *.war 2>/dev/null || true
                 rm -rf war-build/ 2>/dev/null || true
             '''
         }
         success {
-            echo "✅ Vue приложение успешно собрано и задеплоено в Tomcat!"
-        }
-        failure {
-            echo "❌ Произошла ошибка при сборке или деплое"
+            echo "🎉 Сборка завершена успешно!"
         }
     }
 }
