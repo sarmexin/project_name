@@ -149,7 +149,8 @@ pipeline {
                         jar -cvf ../${WAR_FILENAME}.war . 2>/dev/null
                         cd ..
 
-                        echo "✅ WAR создан: $(ls -la ${WAR_FILENAME}.war)"
+                        echo "✅ WAR создан"
+                        ls -la ${WAR_FILENAME}.war
                     '''
                 }
             }
@@ -162,13 +163,16 @@ pipeline {
                     sh """
                         # Просто создаем файл для демонстрации
                         echo "Здесь будет деплой на ${TOMCAT_SERVER}"
-                        echo "WAR файл: ${WAR_FILENAME}.war ($(du -h ${WAR_FILENAME}.war | cut -f1))"
+                        echo "WAR файл: ${WAR_FILENAME}.war создан"
 
                         # Для теста - копируем в локальную папку
                         mkdir -p /var/lib/jenkins/deploy-test/
                         cp ${WAR_FILENAME}.war /var/lib/jenkins/deploy-test/
                         echo "✅ WAR скопирован в /var/lib/jenkins/deploy-test/"
                     """
+
+                    // Проверяем размер WAR файла
+                    sh 'du -h ${WAR_FILENAME}.war'
                 }
             }
         }
@@ -184,6 +188,9 @@ pipeline {
         }
         success {
             echo "🎉 Сборка завершена успешно!"
+        }
+        failure {
+            echo "❌ Сборка завершилась с ошибкой"
         }
     }
 }
