@@ -16,9 +16,11 @@ pipeline {
             steps {
                 script {
                     echo "📋 Информация о сборке:"
-                    echo "Ветка: ${env.BRANCH_NAME}"
                     echo "Рабочая директория: ${WORKSPACE}"
                     echo "Целевая папка: ${params.TARGET_FOLDER}"
+
+                    // Покажем что скачалось
+                    sh 'ls -la'
                 }
             }
         }
@@ -27,12 +29,22 @@ pipeline {
             steps {
                 script {
                     // Создаем целевую папку если не существует
-                    sh "mkdir -p ${params.TARGET_FOLDER}"
+                    sh "mkdir -p '${params.TARGET_FOLDER}'"
 
-                    // Копируем файлы
-                    sh "cp -rf ${WORKSPACE}/* ${params.TARGET_FOLDER}/"
+                    // Копируем файлы с экранированием пути
+                    sh "cp -rf '${WORKSPACE}'/* '${params.TARGET_FOLDER}'/"
 
                     echo "✅ Содержимое репозитория скопировано в ${params.TARGET_FOLDER}"
+                }
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                script {
+                    // Проверяем что скопировалось
+                    sh "ls -la '${params.TARGET_FOLDER}'/"
+                    echo "🎉 Развертывание завершено успешно!"
                 }
             }
         }
@@ -41,10 +53,6 @@ pipeline {
     post {
         always {
             echo "🏁 Статус сборки: ${currentBuild.result ?: 'SUCCESS'}"
-        }
-        success {
-            sh "ls -la ${params.TARGET_FOLDER}/"
-            echo "🎉 Развертывание завершено успешно!"
         }
         failure {
             echo "💥 Произошла ошибка при развертывании"
